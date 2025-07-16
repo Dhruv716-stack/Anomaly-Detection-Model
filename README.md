@@ -1,258 +1,149 @@
-# Anomaly Detection Model for User Behavior Analysis
+# Anomaly Detection Production Model — Documentation
 
-This project implements an autoencoder-based anomaly detection system for identifying suspicious user behavior patterns in mobile device interactions. The model analyzes various behavioral traits and device sensor data to detect potential security threats.
+## Overview
+This folder contains a fully production-ready anomaly detection pipeline based on a Random Forest model. It includes all code, model artifacts, preprocessing pipeline, imputation logic, datasets, and evaluation results needed for robust, reproducible, and portable deployment.
 
-## Table of Contents
-- [Data Format Requirements](#data-format-requirements)
-- [Required Columns](#required-columns)
-- [Preprocessing Steps](#preprocessing-steps)
-- [Model Access and Usage](#model-access-and-usage)
-- [Pipeline Usage](#pipeline-usage)
-- [Risk Calculation Function](#risk-calculation-function)
-- [Installation and Dependencies](#installation-and-dependencies)
-- [Example Usage](#example-usage)
+---
 
-## Data Format Requirements
+## Requirements
+- **Python 3.8+** (recommended)
+- **pip** (for installing dependencies)
 
-### Input Data Format
-The model expects input data in CSV format with the following specifications:
+### Python Packages
+All required packages are listed in `requirements.txt`:
+- pandas
+- numpy
+- scikit-learn
 
-- **File Format**: CSV (Comma-separated values)
-- **Encoding**: UTF-8
-- **Date Format**: `YYYY-MM-DD HH:MM:SS` (e.g., "2023-12-01 14:30:25")
-- **Missing Values**: Can be handled by the pipeline (imputed automatically)
-- **Data Types**: Mixed (numeric and categorical features)
-
-### Required Columns
-
-The following columns are **required** for the model to function properly:
-
-#### Behavioral Features (Numeric):
-- `tap_pressure` (float64): Pressure applied during screen taps
-- `swipe_speed` (float64): Speed of swipe gestures
-- `typing_speed` (float64): Average typing speed in characters per second
-- `inter_key_delay` (float64): Average delay between keystrokes
-- `grip_x`, `grip_y`, `grip_z` (float64): Device grip sensor readings
-- `tilt_angle_mean` (float64): Average device tilt angle
-- `dwell_time_avg` (float64): Average time spent on screen elements
-- `wifi_network_hash` (float64): Hash of connected WiFi network
-- `device_tilt_variation` (float64): Variation in device tilt
-- `fast_typing_burst` (int64): Number of rapid typing sequences
-- `gps_drift` (float64): GPS location drift measurement
-- `transaction_amount` (float64): Amount of financial transaction
-
-#### Categorical Features:
-- `gesture_type` (object): Type of gesture performed (e.g., "tap", "swipe", "pinch")
-- `screen_sequence` (object): Sequence of screen interactions
-- `geolocation_cluster` (object): Geographic location cluster identifier
-
-#### Optional Columns:
-- `user_id` (object): User identifier (will be dropped during processing)
-- `trait_categories` (object): Behavioral trait categories (will be dropped during processing)
-- `label` (int): Ground truth labels (0 for normal, 1 for anomaly) - only needed for training
-
-## Preprocessing Steps
-
-### 1. DateTime Preprocessing
-Before feeding data to the model, the following datetime preprocessing must be applied:
-
-```python
-import pandas as pd
-
-# Convert transaction_date to datetime format
-df["transaction_date"] = pd.to_datetime(df["transaction_date"], format="%Y-%m-%d %H:%M:%S")
-
-# Extract time-based features
-df["hour"] = df["transaction_date"].dt.hour
-df["day_of_week"] = df["transaction_date"].dt.dayofweek
-df["is_weekend"] = df["day_of_week"].apply(lambda x: 1 if x >= 5 else 0)
-df["is_night"] = df["hour"].apply(lambda h: 1 if h <= 5 else 0)
-```
-
-### 2. Pipeline Preprocessing
-The model uses a scikit-learn pipeline that automatically handles:
-
-- **Numeric Features**: Mean imputation + StandardScaler normalization
-- **Categorical Features**: Mode imputation + OneHotEncoder encoding
-- **Missing Values**: Automatic imputation for both numeric and categorical data
-
-## Model Access and Usage
-
-### Loading the Model
-```python
-import tensorflow as tf
-from tensorflow.keras.models import load_model
-
-# Load the trained autoencoder model
-autoencoder = load_model("autoencoder_model.keras")
-```
-
-### Model Architecture
-The autoencoder consists of:
-- **Input Layer**: Adapts to the number of features
-- **Encoder**: Dense layers (64 → 32 neurons) with ReLU activation
-- **Decoder**: Dense layers (32 → 64 → input_dim) with ReLU activation
-- **Output**: Reconstruction of input features
-- **Loss Function**: Mean Squared Error (MSE)
-- **Optimizer**: Adam
-
-## Pipeline Usage
-
-### Loading the Pipeline
-```python
-import joblib
-
-# Load the preprocessing pipeline
-pipeline = joblib.load("pipeline.joblib")
-```
-
-### Applying Preprocessing
-```python
-# Prepare features (exclude non-feature columns)
-feature_columns = ['tap_pressure', 'swipe_speed', 'gesture_type', 'typing_speed', 
-                   'inter_key_delay', 'grip_x', 'grip_y', 'grip_z', 'tilt_angle_mean',
-                   'screen_sequence', 'dwell_time_avg', 'geolocation_cluster', 
-                   'wifi_network_hash', 'device_tilt_variation', 'fast_typing_burst',
-                   'gps_drift', 'transaction_amount', 'hour', 'day_of_week', 
-                   'is_weekend', 'is_night']
-
-X = df[feature_columns]
-
-# Apply preprocessing
-X_processed = pipeline.transform(X)
-```
-
-## Risk Calculation Function
-
-The model provides a three-level risk assessment system:
-
-```python
-import numpy as np
-
-def calculate_risk_level(autoencoder, pipeline, input_data, threshold=None):
-    """
-    Calculate risk level for user behavior data.
-    
-    Args:
-        autoencoder: Loaded autoencoder model
-        pipeline: Loaded preprocessing pipeline
-        input_data: DataFrame with required features
-        threshold: Optional custom threshold (default: optimized threshold)
-    
-    Returns:
-        dict: Contains 'risk_level', 'reconstruction_error', 'confidence_score'
-    """
-    
-    # Apply preprocessing
-    X_processed = pipeline.transform(input_data)
-    
-    # Get reconstruction error
-    reconstructions = autoencoder.predict(X_processed)
-    errors = np.mean(np.square(X_processed - reconstructions), axis=1)
-    
-    # Use optimized threshold if not provided
-    if threshold is None:
-        threshold = 0.0178  # Optimized threshold from training
-    
-    # Define risk thresholds
-    low_threshold = np.percentile(errors, 60)  # 60th percentile
-    high_threshold = threshold  # Optimized threshold for high risk
-    
-    def get_risk_label(error):
-        if error < low_threshold:
-            return 'Low'
-        elif error < high_threshold:
-            return 'Moderate'
-        else:
-            return 'High'
-    
-    # Calculate risk levels
-    risk_levels = [get_risk_label(e) for e in errors]
-    
-    # Calculate confidence score (inverse of error, normalized)
-    max_error = np.max(errors)
-    confidence_scores = 1 - (errors / max_error)
-    
-    return {
-        'risk_level': risk_levels[0] if len(risk_levels) == 1 else risk_levels,
-        'reconstruction_error': float(errors[0]) if len(errors) == 1 else errors.tolist(),
-        'confidence_score': float(confidence_scores[0]) if len(confidence_scores) == 1 else confidence_scores.tolist()
-    }
-```
-
-### Risk Levels Explained:
-- **Low Risk**: Reconstruction error < 60th percentile of training errors
-- **Moderate Risk**: Reconstruction error between 60th percentile and optimized threshold
-- **High Risk**: Reconstruction error > optimized threshold (0.0178)
-
-## Installation and Dependencies
-
-### Required Packages:
+Install with:
 ```bash
-pip install tensorflow pandas scikit-learn joblib numpy
+pip install -r requirements.txt
 ```
 
-### Package Versions:
-- TensorFlow >= 2.0.0
-- pandas >= 1.3.0
-- scikit-learn >= 1.0.0
-- joblib >= 1.1.0
-- numpy >= 1.21.0
+---
 
-## Example Usage
+## Environment Setup (Recommended)
+1. **Create a virtual environment:**
+   ```bash
+   python -m venv env
+   source env/bin/activate  # On Windows: env\Scripts\activate
+   ```
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### Complete Example:
+---
+
+## Input Requirements
+The model expects input data as a Python dictionary (or JSON) with the following fields:
+- user_id (str)
+- session_id (str)
+- device_type ("PC" or "Mobile")
+- click_events (int)
+- scroll_events (int)
+- touch_events (int)
+- keyboard_events (int)
+- device_motion (float)
+- time_on_page (int)
+- screen_size (str, e.g., "360x640")
+- browser_info (str, e.g., "Chrome")
+- language (str, e.g., "english")
+- timezone_offset (int)
+- device_orientation (str)
+- geolocation_city (str)
+- transaction_amount (float)
+- transaction_date (str, e.g., "2025-04-18 02:00:00")
+- mouse_movement (int)
+
+**Missing values are handled automatically** using mean/mode imputation (see below).
+
+---
+
+## How to Use the Model and Pipeline
+
+### 1. **Single Prediction (from Python)**
 ```python
+import pickle
 import pandas as pd
-import tensorflow as tf
-import joblib
 import numpy as np
 
-# Load models
-autoencoder = tf.keras.models.load_model("autoencoder_model.keras")
-pipeline = joblib.load("pipeline.joblib")
+# Load artifacts
+with open('rf_model.pkl', 'rb') as f:
+    model = pickle.load(f)
+with open('scaler.pkl', 'rb') as f:
+    scaler = pickle.load(f)
+with open('label_encoders.pkl', 'rb') as f:
+    label_encoders = pickle.load(f)
+with open('feature_cols.pkl', 'rb') as f:
+    feature_cols = pickle.load(f)
+with open('imputation_values.pkl', 'rb') as f:
+    imputation_values = pickle.load(f)
 
-# Load and preprocess data
-df = pd.read_csv("your_input_data.csv")
+def preprocess_input(input_dict):
+    df = pd.DataFrame([input_dict])
+    # Impute missing values
+    for col, val in imputation_values.items():
+        if col not in df.columns or pd.isnull(df.at[0, col]):
+            df[col] = val
+    # ... (add flag_obvious_anomalies, encode categoricals, scale, as in predict.py)
+    # See predict.py for full logic
+    return X_scaled, df
 
-# DateTime preprocessing
-df["transaction_date"] = pd.to_datetime(df["transaction_date"], format="%Y-%m-%d %H:%M:%S")
-df["hour"] = df["transaction_date"].dt.hour
-df["day_of_week"] = df["transaction_date"].dt.dayofweek
-df["is_weekend"] = df["day_of_week"].apply(lambda x: 1 if x >= 5 else 0)
-df["is_night"] = df["hour"].apply(lambda h: 1 if h <= 5 else 0)
-
-# Prepare features
-feature_columns = ['tap_pressure', 'swipe_speed', 'gesture_type', 'typing_speed', 
-                   'inter_key_delay', 'grip_x', 'grip_y', 'grip_z', 'tilt_angle_mean',
-                   'screen_sequence', 'dwell_time_avg', 'geolocation_cluster', 
-                   'wifi_network_hash', 'device_tilt_variation', 'fast_typing_burst',
-                   'gps_drift', 'transaction_amount', 'hour', 'day_of_week', 
-                   'is_weekend', 'is_night']
-
-X = df[feature_columns]
-
-# Calculate risk
-risk_result = calculate_risk_level(autoencoder, pipeline, X)
-
-print(f"Risk Level: {risk_result['risk_level']}")
-print(f"Reconstruction Error: {risk_result['reconstruction_error']:.4f}")
-print(f"Confidence Score: {risk_result['confidence_score']:.4f}")
+# Use the predict() function from predict.py for full pipeline
 ```
 
-## Model Performance
+### 2. **Command Line Prediction**
+Prepare your input as a JSON file (see `test_input_missing.json` for an example):
+```bash
+python predict.py input.json
+```
 
-The model achieves the following performance metrics:
-- **Accuracy**: 99.9%
-- **Precision**: 100% (Anomaly detection)
-- **Recall**: 90% (Anomaly detection)
-- **F1-Score**: 95% (Anomaly detection)
-- **ROC-AUC Score**: 0.967
+### 3. **Integration in Other Backends**
+- Load all artifacts once at server startup.
+- For each request, preprocess input as above and call the model for prediction.
+- Return the output (predicted_label, anomaly_score, risk_level, risk_reason) as your API response.
 
-## Notes
+---
 
-- The model is trained on imbalanced data with a focus on detecting rare anomalies
-- The optimized threshold (0.0178) was determined by maximizing F1-score on the validation set
-- Risk levels are calculated relative to the training data distribution
-- The pipeline automatically handles missing values and feature scaling
-- All categorical features are automatically encoded using one-hot encoding
+## Output
+For each input, the model returns:
+- `predicted_label`: 0 (normal) or 1 (anomaly)
+- `anomaly_score`: probability of anomaly
+- `risk_level`: Low, Medium, or High
+- `risk_reason`: brief explanation for Medium/High risk
+
+---
+
+## Retraining or Updating the Model
+To retrain or update the model with new data:
+```bash
+python export_rf_production_model.py
+```
+This will regenerate all artifacts using the latest training data and logic.
+
+---
+
+## Datasets and Results
+- All datasets used for training and testing are included for reproducibility.
+- The best evaluation results are in `realistic_model_results.csv`.
+
+---
+
+## Imputation Logic
+- **Numerical features:** Imputed with mean (or 0 for counts)
+- **Categorical features:** Imputed with mode (most frequent value)
+- Imputation values are saved in `imputation_values.pkl` and used automatically.
+
+---
+
+## Notes for Production Use
+- The folder is fully self-contained and portable.
+- All preprocessing, imputation, and risk logic is included in `predict.py`.
+- You can integrate the logic into any Python backend (Flask, FastAPI, Django, etc.)
+- For batch scoring, simply loop over your data and call the prediction pipeline.
+
+---
+
+## Support
+For questions, integration help, or further customization, see the main project README or contact the author. 
