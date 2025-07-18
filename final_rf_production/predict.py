@@ -119,7 +119,8 @@ def preprocess_input(input_dict):
         del df['time_on_page_safe']
     for col, le in label_encoders.items():
         if col in df.columns:
-            df[col] = le.transform(df[col].astype(str))
+            df[col] = df[col].astype(str).apply(lambda x: x if x in le.classes_ else 'unknown')
+            df[col] = le.transform(df[col])
     for col in feature_cols:
         if col not in df.columns:
             df[col] = 0

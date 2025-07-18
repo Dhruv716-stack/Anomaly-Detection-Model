@@ -56,9 +56,9 @@ def preprocess_data(train_data, test_data, extra_test_data=None):
             [train_data[col], test_data[col]] + ([extra_test_data[col]] if extra_test_data is not None and col in extra_test_data.columns else [])
         ).unique()
         le = LabelEncoder()
-        le.fit(all_values)
-        train_data[col] = le.transform(train_data[col])
-        test_data[col] = le.transform(test_data[col])
+            le.fit(all_values)
+            train_data[col] = le.transform(train_data[col])
+            test_data[col] = le.transform(test_data[col])
         if extra_test_data is not None and col in extra_test_data.columns:
             extra_test_data[col] = le.transform(extra_test_data[col])
     

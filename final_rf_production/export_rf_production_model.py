@@ -111,7 +111,14 @@ for col, val in imputation_values.items():
 label_encoders = {}
 for col in categorical_cols:
     le = LabelEncoder()
-    train_data[col] = le.fit_transform(train_data[col])
+    # Add 'unknown' to the set of classes if not present
+    all_values = train_data[col].astype(str).unique().tolist()
+    if 'unknown' not in all_values:
+        all_values.append('unknown')
+    le.fit(all_values)
+    # Map any value not in classes_ to 'unknown'
+    train_data[col] = train_data[col].astype(str).apply(lambda x: x if x in le.classes_ else 'unknown')
+    train_data[col] = le.transform(train_data[col])
     label_encoders[col] = le
 
 # Prepare features/labels

@@ -36,27 +36,47 @@ pip install -r requirements.txt
 ---
 
 ## Input Requirements
-The model expects input data as a Python dictionary (or JSON) with the following fields:
-- user_id (str)
-- session_id (str)
-- device_type ("PC" or "Mobile")
-- click_events (int)
-- scroll_events (int)
-- touch_events (int)
-- keyboard_events (int)
-- device_motion (float)
-- time_on_page (int)
-- screen_size (str, e.g., "360x640")
-- browser_info (str, e.g., "Chrome")
-- language (str, e.g., "english")
-- timezone_offset (int)
-- device_orientation (str)
-- geolocation_city (str)
-- transaction_amount (float)
-- transaction_date (str, e.g., "2025-04-18 02:00:00")
-- mouse_movement (int)
+The model expects input data as a Python dictionary (or JSON) with the following fields (all other columns are ignored):
 
-**Missing values are handled automatically** using mean/mode imputation (see below).
+- device_type
+- click_events
+- scroll_events
+- touch_events
+- keyboard_events
+- device_motion
+- time_on_page
+- screen_size
+- browser_info
+- language
+- timezone_offset
+- device_orientation
+- geolocation_city
+- transaction_amount
+- mouse_movement
+
+**The following features are automatically derived and used by the model:**
+- obvious_anomaly_flag
+- clicks_per_sec
+- scrolls_per_sec
+- touches_per_sec
+- keyboard_per_sec
+- interaction_score
+- is_odd_hour
+- is_large_transaction
+- is_short_session
+- interaction_diversity
+- behavioural_consistency
+- input_to_navigation_ratio
+- active_to_passive_ratio
+- session_complexity
+- transaction_per_min
+- is_high_value_short_session
+- is_small_screen
+- is_large_screen
+
+**Do not include user_id or session_id in your input.**
+
+Missing values are handled automatically using mean/mode imputation (see below).
 
 ---
 
