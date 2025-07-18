@@ -1,8 +1,7 @@
 import pickle
 import pandas as pd
 import numpy as np
-import sys
-from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 
 # Load artifacts
 with open('rf_model.pkl', 'rb') as f:
@@ -19,7 +18,6 @@ with open('imputation_values.pkl', 'rb') as f:
 def flag_obvious_anomalies(df):
     flag = np.zeros(len(df), dtype=int)
     for i, row in df.iterrows():
-        # Slightly less sensitive: higher threshold and fewer hours
         if (row['transaction_amount'] > 10000) and (pd.to_datetime(row['transaction_date']).hour in [1,2,3]):
             flag[i] = 1
         elif (row['click_events'] >= 30) or (row['mouse_movement'] >= 1500):
@@ -35,54 +33,11 @@ def flag_obvious_anomalies(df):
     df['obvious_anomaly_flag'] = flag
     return df
 
-def assign_risk_level(score):
-    if score < 0.45:
-        return 'Low'
-    elif score < 0.75:
-        return 'Medium'
-    else:
-        return 'High'
-
-def get_risk_reasons(row, risk_level):
-    reasons = []
-    # Slightly less sensitive: higher threshold and fewer hours
-    if row.get('transaction_amount', 0) > 10000 and pd.to_datetime(row.get('transaction_date', '2000-01-01')).hour in [1,2,3]:
-        reasons.append('Large transaction at odd hour')
-    if row.get('click_events', 0) >= 30:
-        reasons.append('Very high click events')
-    if row.get('mouse_movement', 0) >= 1500:
-        reasons.append('Extreme mouse movement')
-    if row.get('device_type', -1) == 1 and row.get('touch_events', 0) >= 20:
-        reasons.append('High touch events on Mobile')
-    if row.get('device_type', -1) == 1 and row.get('device_motion', 0) >= 3.0:
-        reasons.append('Device motion spike on Mobile')
-    if row.get('time_on_page', 0) in [10, 600]:
-        reasons.append('Unusual time on page')
-    if row.get('keyboard_events', 1) == 0 and row.get('transaction_amount', 0) > 5000:
-        reasons.append('Zero keyboard events with high transaction')
-    if row.get('transaction_amount', 0) > 10000:
-        reasons.append('Extremely large transaction')
-    if row.get('click_events', 0) == 0:
-        reasons.append('No click events')
-    if row.get('touch_events', 0) == 0 and row.get('device_type', -1) == 1:
-        reasons.append('No touch events on Mobile')
-    if risk_level == 'High':
-        return '; '.join(reasons[:3]) if reasons else 'Multiple strong anomaly signals'
-    elif risk_level == 'Medium':
-        return reasons[0] if reasons else 'Some features are moderately unusual'
-    else:
-        return ''
-
-def preprocess_input(input_dict):
-    df = pd.DataFrame([input_dict])
+def preprocess_df(df):
     # Remove user_id and session_id if present
     for col in ['user_id', 'session_id']:
         if col in df.columns:
             df = df.drop(columns=[col])
-    # Impute missing values using imputation_values
-    for col, val in imputation_values.items():
-        if col not in df.columns or pd.isnull(df.at[0, col]):
-            df[col] = val
     df = flag_obvious_anomalies(df)
     # --- SMART FEATURE ENGINEERING ---
     df['time_on_page_safe'] = df['time_on_page'].replace(0, 1)
@@ -117,6 +72,13 @@ def preprocess_input(input_dict):
     df['is_large_screen'] = df['screen_size'].isin(large_screens).astype(int)
     if 'time_on_page_safe' in df.columns:
         del df['time_on_page_safe']
+    # Impute missing values (skip derived features and user_id)
+    for col, val in imputation_values.items():
+        if col == 'obvious_anomaly_flag' or col == 'user_id':
+            continue
+        if col in feature_cols:
+            if col not in df.columns or df[col].isnull().any():
+                df[col] = df[col].fillna(val)
     for col, le in label_encoders.items():
         if col in df.columns:
             df[col] = le.transform(df[col].astype(str))
@@ -127,25 +89,33 @@ def preprocess_input(input_dict):
     X_scaled = scaler.transform(X)
     return X_scaled, df
 
-def predict(input_dict):
-    X_scaled, df_proc = preprocess_input(input_dict)
-    proba = model.predict_proba(X_scaled)[:,1][0]
-    pred = int(proba >= 0.5)
-    risk = assign_risk_level(proba)
-    reason = get_risk_reasons(df_proc.iloc[0], risk)
-    return {
-        'predicted_label': pred,
-        'anomaly_score': proba,
-        'risk_level': risk,
-        'risk_reason': reason
-    }
+def evaluate_on_dataset(csv_path, label_col='label'):
+    df = pd.read_csv(csv_path, parse_dates=['transaction_date'])
+    y_true = df[label_col].values
+    X_scaled, _ = preprocess_df(df)
+    y_proba = model.predict_proba(X_scaled)[:,1]
+    y_pred = (y_proba >= 0.5).astype(int)
+    acc = accuracy_score(y_true, y_pred)
+    prec = precision_score(y_true, y_pred)
+    rec = recall_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred)
+    auc = roc_auc_score(y_true, y_proba)
+    print(f"Results for {csv_path}:")
+    print(f"  Accuracy:  {acc:.4f}")
+    print(f"  Precision: {prec:.4f}")
+    print(f"  Recall:    {rec:.4f}")
+    print(f"  F1-Score:  {f1:.4f}")
+    print(f"  AUC:       {auc:.4f}\n")
+
+def assign_risk_level(score):
+    if score < 0.45:
+        return 'Low'
+    elif score < 0.75:
+        return 'Medium'
+    else:
+        return 'High'
 
 if __name__ == '__main__':
-    import json
-    if len(sys.argv) == 2 and sys.argv[1].endswith('.json'):
-        with open(sys.argv[1], 'r') as f:
-            input_dict = json.load(f)
-        result = predict(input_dict)
-        print(json.dumps(result, indent=2))
-    else:
-        print('Usage: python predict.py input.json') 
+    print("Evaluating production model on test datasets...\n")
+    evaluate_on_dataset('synthetic_behavior_5%_dataset_multifeature_anomalies.csv')
+    evaluate_on_dataset('synthetic_behavior_dataset.csv') 
